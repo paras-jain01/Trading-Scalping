@@ -2,8 +2,26 @@
  * Core health/discovery/launch logic.
  */
 import { getClient, getTargetInfo, evaluate } from '../connection.js';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 import { execSync, spawn } from 'child_process';
+
+function scanWindowsStore() {
+  if (process.platform !== 'win32') return [];
+  const results = [];
+  try {
+    const out = execSync(
+      'powershell -NoProfile -Command "(Get-AppxPackage -Name *TradingView*).InstallLocation"',
+      { timeout: 8000 }
+    ).toString().trim();
+    for (const line of out.split('\n')) {
+      const dir = line.trim();
+      if (!dir) continue;
+      const exe = `${dir}\\TradingView.exe`;
+      if (existsSync(exe)) results.push(exe);
+    }
+  } catch { /* ignore */ }
+  return results;
+}
 
 export async function healthCheck() {
   await getClient();
@@ -173,6 +191,7 @@ export async function launch({ port, kill_existing } = {}) {
       `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
       `${process.env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
       `${process.env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
+      ...scanWindowsStore(),
     ],
     linux: [
       '/opt/TradingView/tradingview',

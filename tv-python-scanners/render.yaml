@@ -1,0 +1,36 @@
+# Render.com free tier configuration
+# Deploy this repo to render.com -> New Web Service -> Connect GitHub repo
+# Render will auto-detect this file
+
+services:
+  - type: web
+    name: tv-intraday-scalper
+    env: python
+    region: singapore  # Closest to India
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m src.intraday_scan
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false  # Set in Render dashboard
+      - key: TELEGRAM_CHAT_ID
+        sync: false  # Set in Render dashboard
+      - key: PYTHONUNBUFFERED
+        value: "1"
+
+  # Cron job for daily scan (alternative to GitHub Actions)
+  - type: cron
+    name: tv-daily-prebreakout
+    env: python
+    region: singapore
+    plan: free
+    schedule: "30 10 * * 1-5"  # 10:30 UTC = 16:00 IST, Mon-Fri
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m src.daily_scan
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: PYTHONUNBUFFERED
+        value: "1"

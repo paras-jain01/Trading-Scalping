@@ -1,0 +1,215 @@
+//@version=5
+indicator("Pre-Breakout AI Scanner", shorttitle="PB Scanner", overlay=true, max_labels_count=500)
+
+// =============================================================================
+// INPUTS
+// =============================================================================
+// Lookback periods
+lookback52w      = input.int(252, "52-Week High Lookback", minval=1)
+lookbackConsolid = input.int(10,  "Consolidation Lookback", minval=1)
+lookbackOBV      = input.int(50,  "OBV Trend Lookback", minval=1)
+lookbackTrend    = input.int(60,  "Trend Continuation Lookback", minval=1)
+
+// RSI settings
+rsiLen           = input.int(14,  "RSI Length", minval=1)
+rsiAvgLen        = input.int(20,  "RSI Average Length", minval=1)
+rsiLow           = input.int(40,  "RSI Lower Bound", minval=0, maxval=100)
+rsiHigh          = input.int(65,  "RSI Upper Bound", minval=0, maxval=100)
+rsiAvgMin        = input.int(50,  "RSI 20-Day Avg Minimum", minval=0, maxval=100)
+
+// EMA settings
+emaFast          = input.int(20,  "Fast EMA", minval=1)
+emaMid           = input.int(50,  "Mid EMA", minval=1)
+emaSlow          = input.int(200, "Slow EMA", minval=1)
+
+// Volume settings
+volAvgLen        = input.int(20,  "Volume Average Length", minval=1)
+
+// Price proximity
+proximityPct     = input.float(25.0, "Proximity to 52W High (%)", minval=0, maxval=100) / 100
+
+// Consolidation threshold (10-day range as % of 52-week range)
+consolThreshold  = input.float(0.15, "Max Consolidation Ratio", minval=0.01, maxval=1.0)
+
+// Trailing stop settings
+trailType        = input.string("ATR", "Trailing Stop Type", options=["ATR", "Percent"])
+atrLen           = input.int(14, "ATR Length", minval=1)
+atrMult          = input.float(2.5, "ATR Multiplier", minval=0.1)
+trailPct         = input.float(5.0, "Trailing %", minval=0.1, maxval=50) / 100
+
+// Visual settings
+showLabels       = input.bool(true, "Show Buy/Sell Labels")
+showTrailStop    = input.bool(true, "Show Trailing Stop Line")
+
+// =============================================================================
+// CALCULATIONS
+// =============================================================================
+
+// 52-Week High
+high52w = ta.highest(high, lookback52w)
+
+// EMAs
+ema20 = ta.ema(close, emaFast)
+ema50 = ta.ema(close, emaMid)
+ema200 = ta.ema(close, emaSlow)
+
+// RSI
+rsi = ta.rsi(close, rsiLen)
+rsiAvg = ta.sma(rsi, rsiAvgLen)
+
+// Volume
+volAvg = ta.sma(volume, volAvgLen)
+
+// OBV (On-Balance Volume) - manual calculation
+obvChange = volume * (close > close[1] ? 1 : close < close[1] ? -1 : 0)
+obv = 0.0
+obv := nz(obv[1]) + obvChange
+obvTrend = ta.linreg(obv, lookbackOBV, 0) // Linear regression slope > 0 = upward trend
+
+// Consolidation: 10-day range vs 252-day range
+range10 = ta.highest(high, lookbackConsolid) - ta.lowest(low, lookbackConsolid)
+range52w = ta.highest(high, lookback52w) - ta.lowest(low, lookback52w)
+consolRatio = range52w > 0 ? range10 / range52w : 0
+
+// Price proximity to 52-week high
+proximity = (high52w - close) / high52w
+
+// Trend continuation: price today > price 60 days ago
+trendContinuation = close > close[lookbackTrend]
+
+// Trailing Stop
+trailStop = 0.0
+if trailType == "ATR"
+    atrVal = ta.atr(atrLen)
+    trailStop := close - atrVal * atrMult
+    trailStop := math.max(trailStop, trailStop[1]) // Only move up
+else
+    trailStop := close * (1 - trailPct)
+    trailStop := math.max(trailStop, trailStop[1])
+
+// =============================================================================
+// BUY CONDITIONS (All 12 must be true)
+// =============================================================================
+
+// 1. Price Proximity: Close within 15% of 52-week High
+cond1 = proximity <= proximityPct
+
+// 2. Consolidation: 10-day range is tight vs 52-week range
+cond2 = consolRatio <= consolThreshold
+
+// 3. Trend Alignment: 20 EMA > 50 EMA > 200 EMA
+cond3 = ema20 > ema50 and ema50 > ema200
+
+// 4. RSI Sweet Spot: RSI between 40-65
+cond4 = rsi >= rsiLow and rsi <= rsiHigh
+
+// 5. RSI 20-day Average > 50
+cond5 = rsiAvg > rsiAvgMin
+
+// 6. Momentum Rising: Current RSI > RSI 5 bars ago
+cond6 = rsi > rsi[5]
+
+// 7. Volume Compression: Current volume < 20-day volume average
+cond7 = volume < volAvg
+
+// 8. Accumulation (OBV): OBV trending upward (linear regression slope > 0)
+cond8 = obvTrend > 0
+
+// 9. Trend Continuation: Price > Price 60 days ago
+cond9 = trendContinuation
+
+// 10. Price above 200 EMA (long-term uptrend)
+cond10 = close > ema200
+
+// 11. Price above 50 EMA (medium-term uptrend)
+cond11 = close > ema50
+
+// 12. RSI not overbought (< 70 for safety)
+cond12 = rsi < 70
+
+// Combined Buy Signal
+buyCondition = cond1 and cond2 and cond3 and cond4 and cond5 and cond6 and cond7 and cond8 and cond9 and cond10 and cond11 and cond12
+
+// =============================================================================
+// SELL CONDITIONS
+// =============================================================================
+
+// Trend alignment breaks: 20 EMA crosses below 50 EMA
+trendBreak = ta.crossunder(ema20, ema50)
+
+// Price drops below trailing stop
+stopHit = close < trailStop
+
+sellCondition = trendBreak or stopHit
+
+// =============================================================================
+// PLOTTING
+// =============================================================================
+
+// EMAs (optional visual reference)
+plot(ema20,  "EMA 20",  color=color.new(color.blue,  0), linewidth=1, editable=false)
+plot(ema50,  "EMA 50",  color=color.new(color.orange, 0), linewidth=1, editable=false)
+plot(ema200, "EMA 200", color=color.new(color.red,   0), linewidth=2, editable=false)
+
+// Trailing Stop Line
+plot(showTrailStop ? trailStop : na, "Trailing Stop", color=color.new(color.purple, 0), linewidth=2, style=plot.style_circles)
+
+// Buy Signal
+plotshape(buyCondition and showLabels, title="Buy Signal", location=location.belowbar, color=color.new(color.green, 0), style=shape.labelup, text="▲ BUY", textcolor=color.white, size=size.normal)
+
+// Sell Signal
+plotshape(sellCondition and showLabels, title="Sell Signal", location=location.abovebar, color=color.new(color.red, 0), style=shape.labeldown, text="▼ SELL", textcolor=color.white, size=size.normal)
+
+// =============================================================================
+// DEBUG / INFO TABLE
+// =============================================================================
+var table infoTable = table.new(position.top_right, 2, 14, bgcolor=color.new(color.black, 80), border_width=1)
+
+if barstate.islast
+    table.cell(infoTable, 0, 0, "PRE-BREAKOUT SCANNER", bgcolor=color.new(color.blue, 80), text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 0, "", bgcolor=color.new(color.blue, 80))
+
+    table.cell(infoTable, 0, 1, "52W High", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 1, str.tostring(high52w, "#.##"), text_color=color.white, text_size=size.tiny)
+
+    table.cell(infoTable, 0, 2, "Proximity %", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 2, str.tostring(proximity * 100, "#.##") + "%", text_color=cond1 ? color.green : color.red, text_size=size.tiny)
+
+    table.cell(infoTable, 0, 3, "Consol Ratio", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 3, str.tostring(consolRatio * 100, "#.##") + "%", text_color=cond2 ? color.green : color.red, text_size=size.tiny)
+
+    table.cell(infoTable, 0, 4, "EMA Alignment", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 4, "20>50>200", text_color=cond3 ? color.green : color.red, text_size=size.tiny)
+
+    table.cell(infoTable, 0, 5, "RSI (14)", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 5, str.tostring(rsi, "#.##"), text_color=cond4 ? color.green : color.red, text_size=size.tiny)
+
+    table.cell(infoTable, 0, 6, "RSI 20-Avg", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 6, str.tostring(rsiAvg, "#.##"), text_color=cond5 ? color.green : color.red, text_size=size.tiny)
+
+    table.cell(infoTable, 0, 7, "RSI Momentum", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 7, "Rising", text_color=cond6 ? color.green : color.red, text_size=size.tiny)
+
+    table.cell(infoTable, 0, 8, "Volume vs Avg", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 8, "Compressed", text_color=cond7 ? color.green : color.red, text_size=size.tiny)
+
+    table.cell(infoTable, 0, 9, "OBV Trend", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 9, "Up", text_color=cond8 ? color.green : color.red, text_size=size.tiny)
+
+    table.cell(infoTable, 0, 10, "Trend 60d", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 10, "Higher", text_color=cond9 ? color.green : color.red, text_size=size.tiny)
+
+    table.cell(infoTable, 0, 11, "Trailing Stop", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 11, str.tostring(trailStop, "#.##"), text_color=color.purple, text_size=size.tiny)
+
+    table.cell(infoTable, 0, 12, "BUY SIGNAL", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 12, buyCondition ? "✓ ACTIVE" : "—", text_color=buyCondition ? color.green : color.gray, text_size=size.tiny)
+
+    table.cell(infoTable, 0, 13, "SELL SIGNAL", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 13, sellCondition ? "✓ TRIGGERED" : "—", text_color=sellCondition ? color.red : color.gray, text_size=size.tiny)
+
+// =============================================================================
+// ALERTS
+// =============================================================================
+alertcondition(buyCondition, title="Pre-Breakout Buy Signal", message="Pre-Breakout AI Scanner: BUY signal triggered for {{ticker}} at {{close}}")
+alertcondition(sellCondition, title="Pre-Breakout Sell Signal", message="Pre-Breakout AI Scanner: SELL/EXIT signal triggered for {{ticker}} at {{close}}")

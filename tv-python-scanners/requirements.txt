@@ -1,0 +1,18 @@
+# Data
+yfinance>=0.2.40
+nsepython>=1.0.8
+pandas>=2.1.0
+numpy>=1.24.0
+
+# Indicators
+pandas-ta>=0.3.14b0
+
+# HTTP / Telegram
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# Scheduling (for local dev)
+schedule>=1.2.0
+
+# Timezone
+pytz>=2024.1

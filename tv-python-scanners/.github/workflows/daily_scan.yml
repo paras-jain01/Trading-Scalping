@@ -1,0 +1,41 @@
+name: Daily Pre-Breakout Scan
+
+on:
+  schedule:
+    # Runs at 16:00 IST (10:30 UTC) - post market close
+    - cron: '30 10 * * 1-5'  # Mon-Fri at 10:30 UTC = 16:00 IST
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  daily_scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run daily pre-breakout scan
+        run: |
+          python -m src.daily_scan
+
+      - name: Upload scan results as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-scan-results
+          path: scan_results_*.txt
+          retention-days: 7
